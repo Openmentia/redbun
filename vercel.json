@@ -3,6 +3,5 @@
   "framework": null,
   "buildCommand": "vite build",
   "outputDirectory": "build",
-  "cleanUrls": true,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/((?!_app/|.*\\.[a-z0-9]+$).*)", "destination": "/index.html" }]
 }
