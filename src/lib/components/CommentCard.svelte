@@ -5,6 +5,8 @@
   import Badges from './Badges.svelte';
   import ParentComment from './ParentComment.svelte';
   import PostCard from './PostCard.svelte';
+  import RedditMarkdown from './RedditMarkdown.svelte';
+  import RedditMedia from './RedditMedia.svelte';
   import { ArrowUp, ExternalLink } from '@lucide/svelte';
 
   let { comment, nested = false } = $props();
@@ -68,7 +70,8 @@
             {st.removed ? 'Removed by a moderator, no text archived.' : 'Deleted by its author, no text archived.'}
           </p>
         {:else}
-          <p class="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{comment.body || '(no content)'}</p>
+          <RedditMarkdown source={comment.body || '(no content)'} />
+          <RedditMedia item={comment} kind="comments" />
         {/if}
       {/if}
     </div>

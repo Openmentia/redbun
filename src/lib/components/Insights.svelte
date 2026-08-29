@@ -1,20 +1,16 @@
 <script>
-  import { readAccount } from '$lib/insight.js';
   import { cn } from '$lib/utils.js';
   import Segmented from './ui/Segmented.svelte';
   import Stat from './ui/Stat.svelte';
   import Card from './ui/Card.svelte';
 
-  let { posts = [], comments = [], meta = null, onPickSubreddit } = $props();
+  // reports: { all, posts, comments } precomputed once by the page
+  let { reports = null, onPickSubreddit } = $props();
 
   let scope = $state('all');
   let section = $state('overview');
 
-  const scoped = $derived({
-    posts: scope === 'comments' ? [] : posts,
-    comments: scope === 'posts' ? [] : comments
-  });
-  const r = $derived(readAccount(scoped.posts, scoped.comments, meta));
+  const r = $derived(reports?.[scope] ?? reports?.all ?? null);
 
   const sections = [
     { value: 'overview', label: 'Overview' },
@@ -23,6 +19,11 @@
     { value: 'content', label: 'Content' },
     { value: 'language', label: 'Language' }
   ];
+
+  function heatColor(v, max) {
+    if (!v) return 'var(--color-muted)';
+    return `color-mix(in oklab, var(--color-primary) ${Math.round((v / max) * 88) + 12}%, transparent)`;
+  }
 
   function maxOf(rows) {
     return Math.max(1, ...rows.map((x) => x.value));
@@ -37,9 +38,9 @@
         bind:value={scope}
         size="sm"
         options={[
-          { value: 'all', label: 'All', count: r.counts.total },
-          { value: 'posts', label: 'Posts', count: posts.length },
-          { value: 'comments', label: 'Comments', count: comments.length }
+          { value: 'all', label: 'All', count: reports?.all?.counts.total ?? 0 },
+          { value: 'posts', label: 'Posts', count: reports?.all?.counts.posts ?? 0 },
+          { value: 'comments', label: 'Comments', count: reports?.all?.counts.comments ?? 0 }
         ]}
       />
     </div>
@@ -94,6 +95,28 @@
           </div>
         </Card>
       {/if}
+      <Card class="overflow-x-auto p-4">
+        <h4 class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Hour by weekday (UTC)</h4>
+        <div class="min-w-[560px]">
+          <div class="mb-1 flex gap-[3px] pl-9">
+            {#each r.timing.heatmap.hours as h, i}
+              <span class="w-[15px] text-center text-[8px] text-muted-foreground">{i % 3 === 0 ? h : ''}</span>
+            {/each}
+          </div>
+          {#each r.timing.heatmap.grid as rowvals, d}
+            <div class="mb-[3px] flex items-center gap-[3px]">
+              <span class="w-9 text-[9px] text-muted-foreground">{r.timing.heatmap.days[d]}</span>
+              {#each rowvals as v, h}
+                <span
+                  class="h-[15px] w-[15px] rounded-[3px]"
+                  style="background:{heatColor(v, r.timing.heatmap.max)}"
+                  title="{r.timing.heatmap.days[d]} {r.timing.heatmap.hours[h]}: {v}"
+                ></span>
+              {/each}
+            </div>
+          {/each}
+        </div>
+      </Card>
     {:else if section === 'communities'}
       <p class="text-sm text-muted-foreground">{r.communities.note}</p>
       <div class="space-y-1">
@@ -157,6 +180,7 @@
     {:else if section === 'language'}
       <div class="flex gap-2">
         <Stat class="flex-1" label="Avg length" value="{r.language.avgLen} ch" />
+        <Stat class="flex-1" label="Avg words" value={r.language.avgWords} />
         <Stat class="flex-1" label="Ends on a question" value={r.language.questionRate} />
       </div>
       <div class="grid gap-3 md:grid-cols-2">

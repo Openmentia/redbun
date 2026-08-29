@@ -3,14 +3,29 @@
   import { cleanHandle } from '$lib/handle.js';
   import { gather, isWithheld, fetchProfileMeta } from '$lib/archive.js';
   import { getTheme, setTheme, apply } from '$lib/theme.js';
+  import { readAccount } from '$lib/insight.js';
+  import { layoutGraph } from '$lib/graph.js';
   import PostCard from '$lib/components/PostCard.svelte';
   import CommentCard from '$lib/components/CommentCard.svelte';
   import Insights from '$lib/components/Insights.svelte';
+  import SubGraph from '$lib/components/SubGraph.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import Input from '$lib/components/ui/Input.svelte';
   import Checkbox from '$lib/components/ui/Checkbox.svelte';
   import Segmented from '$lib/components/ui/Segmented.svelte';
-  import { ArrowRight, SlidersHorizontal, Download, Link2, RotateCw } from '@lucide/svelte';
+  import Spinner from '$lib/components/ui/Spinner.svelte';
+  import DropdownMenu from '$lib/components/ui/DropdownMenu.svelte';
+  import DropdownItem from '$lib/components/ui/DropdownItem.svelte';
+  import {
+    ArrowRight,
+    SlidersHorizontal,
+    Download,
+    Link2,
+    RotateCw,
+    Sun,
+    Moon,
+    Monitor
+  } from '@lucide/svelte';
 
   let ready = $state(false);
   let input = $state('');
@@ -25,6 +40,8 @@
   let copied = $state(false);
 
   let meta = $state(null);
+  let report = $state(null); // { all, posts, comments } computed once per dataset
+  let graphLayout = $state(null);
   const blank = () => ({
     posts: { rows: [], page: 0, cursors: [] },
     comments: { rows: [], page: 0, cursors: [] }
@@ -74,7 +91,7 @@
 
   function readUrl() {
     const s = new URLSearchParams(location.search);
-    view = s.get('view') === 'insights' ? 'insights' : 'feed';
+    view = ['insights', 'graph'].includes(s.get('view')) ? s.get('view') : 'feed';
     tab = s.get('tab') === 'comments' ? 'comments' : 'posts';
     sortBy = ['old', 'top', 'discussed'].includes(s.get('sort')) ? s.get('sort') : 'new';
     fSub = s.get('sub') ?? '';
@@ -137,7 +154,26 @@
     meta = m;
     feeds = { posts: seed(p), comments: seed(c) };
     if (!p.rows.length && c.rows.length) tab = 'comments';
+    recompute();
     busy = false;
+  }
+
+  // Heavy read + force layout: run once whenever the loaded rows change, never
+  // on a tab or view click.
+  function recompute() {
+    const P = feeds.posts.rows;
+    const C = feeds.comments.rows;
+    if (!P.length && !C.length) {
+      report = null;
+      graphLayout = null;
+      return;
+    }
+    report = {
+      all: readAccount(P, C, meta),
+      posts: readAccount(P, [], meta),
+      comments: readAccount([], C, meta)
+    };
+    graphLayout = report.all ? layoutGraph({ ...report.all.graph, user: handle }) : null;
   }
 
   async function page(dir) {
@@ -155,6 +191,7 @@
           cursors: [...f.cursors, { first: res.rows[0].created_utc, last: res.rows.at(-1).created_utc }]
         };
       }
+      recompute();
       busy = false;
     } else {
       if (f.cursors.length <= 1) return;
@@ -163,6 +200,7 @@
       busy = true;
       const res = await loadKind(tab, prev ? { after: prev.first } : {});
       feeds[tab] = { rows: res.rows, page: f.page - 1, cursors: stack };
+      recompute();
       busy = false;
     }
     window.scrollTo({ top: 0 });
@@ -187,6 +225,8 @@
     searched = false;
     handle = input = '';
     meta = null;
+    report = null;
+    graphLayout = null;
     feeds = blank();
     fOpen = false;
     fSub = fFrom = fTo = fTerm = '';
@@ -197,9 +237,9 @@
     history.replaceState({}, '', '/');
   }
 
-  function changeTheme(e) {
-    theme = e.currentTarget.value;
-    setTheme(theme);
+  function changeTheme(mode) {
+    theme = mode;
+    setTheme(mode);
   }
 
   function exportJson() {
@@ -255,11 +295,12 @@
         ? `${feeds.comments.rows.length}${feeds.comments.page > 1 ? '+' : ''}`
         : null
     },
+    { value: 'graph', label: 'Graph' },
     { value: 'insights', label: 'Insights' }
   ]);
-  let nav = $derived(view === 'insights' ? 'insights' : tab);
+  let nav = $derived(view === 'feed' ? tab : view);
   function setNav(v) {
-    if (v === 'insights') view = 'insights';
+    if (v === 'insights' || v === 'graph') view = v;
     else {
       view = 'feed';
       tab = v;
@@ -277,23 +318,31 @@
 <header class="sticky top-0 z-20 border-b bg-background">
   <div class="mx-auto flex max-w-3xl items-center justify-between px-5 py-3">
     <button class="flex items-center gap-2.5" onclick={reset}>
-      <img src="/icon.svg" alt="" width="30" height="30" />
+      <img src="/icon.svg" alt="" width="30" height="30" class="h-[30px] w-[30px] rounded-full" />
       <span class="text-lg font-semibold tracking-tight">redbun</span>
     </button>
     <div class="flex items-center gap-3 text-xs text-muted-foreground">
       <a class="hidden hover:text-foreground sm:inline" href="https://github.com/Openmentia/" target="_blank" rel="noreferrer">
         A product by <span class="font-medium text-foreground">Openmentia</span>
       </a>
-      <select
-        value={theme}
-        onchange={changeTheme}
-        aria-label="Theme"
-        class="rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <option value="system">System</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
+      <DropdownMenu triggerClass="inline-flex h-8 w-8 items-center justify-center rounded-md border hover:bg-accent">
+        {#snippet trigger()}
+          {#if theme === 'light'}<Sun class="h-4 w-4" />
+          {:else if theme === 'dark'}<Moon class="h-4 w-4" />
+          {:else}<Monitor class="h-4 w-4" />{/if}
+        {/snippet}
+        {#snippet children({ close })}
+          <DropdownItem active={theme === 'system'} onSelect={() => { changeTheme('system'); close(); }}>
+            <Monitor class="h-3.5 w-3.5" /> System
+          </DropdownItem>
+          <DropdownItem active={theme === 'light'} onSelect={() => { changeTheme('light'); close(); }}>
+            <Sun class="h-3.5 w-3.5" /> Light
+          </DropdownItem>
+          <DropdownItem active={theme === 'dark'} onSelect={() => { changeTheme('dark'); close(); }}>
+            <Moon class="h-3.5 w-3.5" /> Dark
+          </DropdownItem>
+        {/snippet}
+      </DropdownMenu>
       <a class="hover:text-foreground" href="https://github.com/Openmentia/redbun" target="_blank" rel="noreferrer" aria-label="Source on GitHub">
         <svg viewBox="0 0 16 16" class="h-5 w-5" fill="currentColor" aria-hidden="true">
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
@@ -391,9 +440,18 @@
     {/if}
 
     {#if busy}
-      <p class="py-16 text-sm text-muted-foreground">Pulling u/{handle} ...</p>
+      <div class="flex flex-col items-center gap-3 py-20 text-sm text-muted-foreground">
+        <Spinner size={32} />
+        Pulling u/{handle}
+      </div>
+    {:else if view === 'graph'}
+      {#if graphLayout}
+        <SubGraph layout={graphLayout} onPick={(n) => n.kind !== 'domain' && pickSubreddit(n.id)} />
+      {:else}
+        <p class="py-16 text-center text-sm text-muted-foreground">Not enough activity to map.</p>
+      {/if}
     {:else if view === 'insights'}
-      <Insights posts={feeds.posts.rows} comments={feeds.comments.rows} {meta} onPickSubreddit={pickSubreddit} />
+      <Insights reports={report} {meta} user={handle} onPickSubreddit={pickSubreddit} />
     {:else if !current.rows.length}
       <div class="py-16 text-center text-muted-foreground">
         <p class="text-sm">No {tab} found for u/{handle}.</p>

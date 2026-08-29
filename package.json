@@ -20,6 +20,9 @@
   "dependencies": {
     "@lucide/svelte": "^1.37.0",
     "clsx": "^2.1.1",
+    "d3-force": "^3.0.0",
+    "dompurify": "^3.4.14",
+    "marked": "^18.0.11",
     "tailwind-merge": "^3.6.0"
   }
 }

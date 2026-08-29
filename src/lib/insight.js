@@ -162,6 +162,63 @@ export function readAccount(posts = [], comments = [], meta = null) {
     }
   }
 
+  // hour x weekday heatmap
+  const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  let heatMax = 0;
+  for (const t of times) {
+    const d = new Date(t * 1000);
+    const v = ++grid[d.getUTCDay()][d.getUTCHours()];
+    if (v > heatMax) heatMax = v;
+  }
+  const weekend = times.filter((t) => {
+    const w = new Date(t * 1000).getUTCDay();
+    return w === 0 || w === 6;
+  }).length;
+
+  // score by hour, to hint at a good time to post
+  const hourScore = new Array(24).fill(0);
+  const hourCnt = new Array(24).fill(0);
+  for (const x of all) {
+    const h = new Date(x.created_utc * 1000).getUTCHours();
+    hourScore[h] += x.score || 0;
+    hourCnt[h]++;
+  }
+  const hourAvg = hourScore.map((s, i) => (hourCnt[i] ? s / hourCnt[i] : 0));
+  const bestScoreHour = hourAvg.indexOf(Math.max(...hourAvg));
+
+  // subreddit spread (normalised entropy, 0 = one sub, 1 = perfectly even)
+  const subTotal = all.length;
+  let entropy = 0;
+  for (const [, n] of subMap) {
+    const p = n / subTotal;
+    entropy -= p * Math.log2(p);
+  }
+  const spread = subMap.size > 1 ? entropy / Math.log2(subMap.size) : 0;
+
+  const awards = all.reduce((a, x) => a + (x.total_awards_received || 0), 0);
+  const crossposts = P.filter((x) => x.crosspost_parent_id || x.is_crosspost).length;
+  const wordTotal = [...words.values()].reduce((a, b) => a + b, 0);
+
+  // graph: user in the centre, top subreddits + top domains around it
+  const graphSubs = subs.slice(0, 22).map((s) => {
+    const list = subScores.get(s.label) || [];
+    const posts = P.filter((x) => x.subreddit === s.label).length;
+    return { id: s.label, count: s.value, posts, comments: s.value - posts, kind: 'sub' };
+  });
+  const graphDomains = top(domains, 6).map((d) => ({
+    id: d.label,
+    count: d.value,
+    posts: d.value,
+    comments: 0,
+    kind: 'domain'
+  }));
+  const graphNodes = [...graphSubs, ...graphDomains];
+  const graph = {
+    user: '',
+    nodes: graphNodes,
+    links: graphNodes.map((n) => ({ source: '__me', target: n.id }))
+  };
+
   const pctOf = (n) => `${Math.round((n / all.length) * 100)}%`;
 
   const headline = [];
@@ -201,17 +258,28 @@ export function readAccount(posts = [], comments = [], meta = null) {
       {
         label: 'Peak month',
         value: peakMonth ? `${MONTH[+peakMonth[0].slice(5, 7) - 1]} ${peakMonth[0].slice(0, 4)}` : 'n/a'
-      }
+      },
+      { label: 'Weekend share', value: pctOf(weekend) },
+      { label: 'Self / text posts', value: P.length ? `${Math.round((selfPosts / P.length) * 100)}%` : 'n/a' },
+      { label: 'Sub spread', value: `${Math.round(spread * 100)}%` },
+      { label: 'Awards received', value: big(awards) },
+      { label: 'Crossposts', value: crossposts },
+      { label: 'Best-scoring hour', value: `${HOURS[bestScoreHour]} UTC` }
     ],
     timing: {
       hour: hours.map((v, i) => ({ label: HOURS[i], value: v })),
       weekday: weekdays.map((v, i) => ({ label: DOW[i], value: v })),
       month: monthList.map(([k, v]) => ({ label: `${k.slice(2)}`, value: v })),
-      note: `Busiest hour ${HOURS[busiestHour]} UTC, busiest day ${DOW[busiestDay]}. Active window ${HOURS[windowAt]} to ${HOURS[(windowAt + 6) % 24]} UTC.`
+      heatmap: { grid, max: heatMax, days: DOW, hours: HOURS },
+      note: `Busiest hour ${HOURS[busiestHour]} UTC, busiest day ${DOW[busiestDay]}. Active window ${HOURS[windowAt]} to ${HOURS[(windowAt + 6) % 24]} UTC. Highest average score on things posted around ${HOURS[bestScoreHour]} UTC.`
+    },
+    graph: {
+      ...graph,
+      note: `${subMap.size} subreddits and ${graphDomains.length} outbound domains in this sample. Click any node to filter the feed to it.`
     },
     communities: {
       subs,
-      note: `${subMap.size} subreddits in the sample. Click a bar to filter results to that subreddit.`
+      note: `${subMap.size} subreddits in the sample, spread score ${Math.round(spread * 100)}%. Click a bar to filter results to that subreddit.`
     },
     content: {
       buckets: scoreBuckets,
@@ -220,9 +288,10 @@ export function readAccount(posts = [], comments = [], meta = null) {
       note: `${P.length ? Math.round((selfPosts / P.length) * 100) : 0}% of posts are self / text. ${pctOf(questions)} of items end on a question.`
     },
     language: {
-      words: top(words, 16),
+      words: top(words, 18),
       phrases: top(new Map([...bigrams].filter(([, v]) => v > 1)), 12),
       avgLen: Math.round(charTotal / all.length),
+      avgWords: Math.round(wordTotal / all.length),
       questionRate: pctOf(questions)
     }
   };
