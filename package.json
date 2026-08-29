@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@sveltejs/adapter-vercel": "^6.3.4",
+    "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.8.1",
     "@sveltejs/vite-plugin-svelte": "^4.0.2",
     "@tailwindcss/vite": "^4.3.3",
