@@ -57,7 +57,12 @@
   let fStripped = $state(false);
 
   const current = $derived(feeds[tab]);
-  const sortedRows = $derived(sortRows(current.rows, sortBy));
+  const filteredRows = $derived(
+    fSub.trim()
+      ? current.rows.filter((r) => r.subreddit?.toLowerCase() === fSub.trim().toLowerCase())
+      : current.rows
+  );
+  const sortedRows = $derived(sortRows(filteredRows, sortBy));
 
   function sortRows(rows, mode) {
     const copy = [...rows];
@@ -218,7 +223,6 @@
     fSub = name;
     fOpen = true;
     view = 'feed';
-    if (handle) run(handle);
   }
 
   function reset() {
@@ -452,7 +456,7 @@
       {/if}
     {:else if view === 'insights'}
       <Insights reports={report} {meta} user={handle} onPickSubreddit={pickSubreddit} />
-    {:else if !current.rows.length}
+    {:else if !sortedRows.length}
       <div class="py-16 text-center text-muted-foreground">
         <p class="text-sm">No {tab} found for u/{handle}.</p>
         <p class="mt-1 text-xs">Not indexed yet, filtered out, or withheld at the account holder's request.</p>
